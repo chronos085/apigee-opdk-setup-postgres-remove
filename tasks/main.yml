@@ -1,0 +1,67 @@
+---
+# tasks file for /Users/carlosfrias/apigee-workspace/opdk-workspace/apigee-opdk-setup-postgresql-remove
+- name: Set attributes if available
+  ignore_errors: true
+  set_fact:
+    pgmaster_group_name: "{{ pgmaster_group_name | default('pgmaster') }}"
+    pgstandby_group_name: "{{ pgstandby_group_name | default('pgstandby') }}"
+    master_uuid: "{{ hostvars[groups[pgmaster_group_name][0]].edge_ps_self.uUID }}"
+    standby_uuid: "{{ hostvars[groups[pgstandby_group_name][0]].edge_ps_self.uUID }}"
+    server_type: "{{ hostvars[groups[pgmaster_group_name][0]].edge_ps_self.type[0] }}"
+
+- name: Assert that attributes are available.
+  assert:
+    that:
+      - "ax_group is defined and ax_group | trim | length > 0"
+      - "consumer_group is defined and consumer_group | trim | length > 0"
+      - "server_type is defined and server_type | trim | length > 0"
+      - "master_uuid is defined and uuid | trim | length > 0"
+      - "standby_uuid is defined and uuid | trim | length > 0"
+    msg: "Please provide the missing attribute"
+
+- name: Capture uuid for master
+  set_fact:
+    cacheable: yes
+    master_standby_uuid: "{{ master_uuid }}"
+
+- name: Construct uuid for master,standby
+  set_fact:
+    cacheable: yes
+    master_standby_uuid: "{{ master_uuid }},{{ standby_uuid }}"
+  when: standby_uuid is defined
+
+- block:
+  - name: Remove postgres to consumer groups
+    uri:
+      url: http://{{ local_mgmt_ip }}:8080/v1/analytics/groups/ax/{{ ax_group }}/consumer-groups/{{ consumer_group }}/datastores/{{ master_standby_uuid }}
+      method: DELETE
+      user: '{{ opdk_user_email }}'
+      password: '{{ opdk_user_pass }}'
+
+  rescue:
+
+    - name: Recover from attempt to remove postgres to consumer groups
+    uri:
+      url: http://127.0.0.1:8080/v1/analytics/groups/ax/{{ ax_group }}/consumer-groups/{{ consumer_group }}/datastores/{{ master_standby_uuid }}
+      method: DELETE
+      user: '{{ opdk_user_email }}'
+      password: '{{ opdk_user_pass }}'
+    delegate_to: "{{ local_mgmt_ip | default(ansible_default_ipv4.address) }}"
+
+- block:
+  - name: Remove postgres server
+    uri:
+      url: http://{{ local_mgmt_ip }}:8080/v1/analytics/groups/ax/{{ ax_group }}/servers?uuid={{ master_standby_uuid }}&type={{ server_type }}
+      method: DELETE
+      user: '{{ opdk_user_email }}'
+      password: '{{ opdk_user_pass }}'
+
+  rescue:
+    - name: Recover from attempt to remove postgres server
+      uri:
+        url: http://127.0.0.1:8080/v1/analytics/groups/ax/{{ ax_group }}/servers?uuid={{ master_standby_uuid }}&type={{ server_type }}
+        method: DELETE
+        user: '{{ opdk_user_email }}'
+        password: '{{ opdk_user_pass }}'
+      delegate_to: "{{ local_mgmt_ip | default(ansible_default_ipv4.address) }}"
+
